@@ -72,6 +72,13 @@ display_delta = total_steps % opt.display_freq
 print_delta = total_steps % opt.print_freq
 save_delta = total_steps % opt.save_latest_freq
 
+# create optimizers
+if opt.fp16:    
+    from apex import amp
+    model, [optimizer_G, optimizer_D] = amp.initialize(model, [model.optimizer_G, model.optimizer_D], opt_level='O1')             
+    model = torch.nn.DataParallel(model, device_ids=opt.gpu_ids)
+else:
+    optimizer_G, optimizer_D = model.module.optimizer_G, model.module.optimizer_D
 
 for epoch in range(start_epoch, opt.niter + opt.niter_decay + 1):
     epoch_start_time = time.time()
@@ -114,14 +121,20 @@ for epoch in range(start_epoch, opt.niter + opt.niter_decay + 1):
 
         ############### Backward Pass - frame1->frame2 ####################
         # update generator weights
-        model.module.optimizer_G.zero_grad()
-        loss_G.backward()
-        model.module.optimizer_G.step()
+        optimizer_G.zero_grad()
+        if opt.fp16:                                
+            with amp.scale_loss(loss_G, optimizer_G) as scaled_loss: scaled_loss.backward()                
+        else:
+            loss_G.backward()
+        optimizer_G.step()
 
         # update discriminator weights
-        model.module.optimizer_D.zero_grad()
-        loss_D.backward()
-        model.module.optimizer_D.step()
+        optimizer_D.zero_grad()
+        if opt.fp16:
+            with amp.scale_loss(loss_D, optimizer_D) as scaled_loss: scaled_loss.backward()
+        else:
+            loss_D.backward()
+        optimizer_D.step()
 
         #call(["nvidia-smi", "--format=csv", "--query-gpu=memory.used,memory.free"]) 
 
